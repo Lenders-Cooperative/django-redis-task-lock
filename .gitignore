@@ -1,0 +1,4 @@
+dist/*
+build/*
+django_redis_task_lock.egg-info/*
+.idea/*
