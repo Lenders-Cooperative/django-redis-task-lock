@@ -4,7 +4,7 @@ that can be passed to the decorator in any order as kwargs to modify the propert
 
 | Option name | Type | Default value | Description |
 | --- | --- | --- | --- |
-| lock_name | str / list[str] | *See note below* | The name of the redis lock |
+| lock_name | str / list[str, list] | *See note below* | The name of the redis lock |
 | timeout | int | 60 | The timeout of the lock |
 | blocking | bool | False | Set whether the lock is blocking or not |
 | cache | str | 'default' | The Django cache to lock |
@@ -22,16 +22,19 @@ This option allows the user to either hard-code the lock name or use a subset of
 To hard-code the lock name, pass a string with the desired name.
 
 By default, the name generator will use all valid args & kwargs.
-Passing a list of strings allows the user to instead select a subset of kwargs or instance attributes.
-Currently, args cannot be selected to be included in lock_name.
-This functionality is best explained with an example.
+Passing a list allows the user to instead select a subset of available parameters.
+Elements of this list must either be strings or lists.
+A string element indicates a *function parameter* should be part of the lock name.
+A list element indicates an *attribute or element of a function parameter* an arbitrary number of layers deep 
+should be part of the lock name.
+This functionality is best explained in broad terms with some examples.
 
 ```python
 class ClassExample:
     def __init__(self):
         self.id = 27
     
-    @lock(lock_name=['arg1', 'id'])
+    @lock(lock_name=['arg1', ['self', 'id']])
     def foo(self, arg1):
         pass
 
@@ -41,14 +44,15 @@ def bar(arg1, arg2, arg3, arg4):
 ```
 
 Take the above code as two example definitions.
-In the case of `bar`, a function call of `bar(1, arg2=2, arg3=3, arg4=4)` would get a lock name of `bar:4:2:3`
+In the case of `bar`, a function call of `bar(1, 2, 3, 4)` would get a lock name of `bar:4:2:3`
+In the case of `foo`, a function call of `ClassExample().foo(1)` would get a lock name of `foo:1:27`.
 
-If a specified string is not found in kwargs, the decorator will assume it's decorating a class function and
-and the user wants to use an instance attribute instead of a kwarg.
-For example, a function call of `ClassExample().foo(1)` would get a lock name of `foo:1:27`.
-To be specific, if a string is not found in kwargs, the decorator will then check if it's an attribute of args[0],
-which in the context of an instance function corresponds to `self`.
-This means that it is not possible for an attribute of a non-self parameter to be part of the lock_name. 
+Using a list to specify an element of the lock name is very flexible.
+The first element should be a string specifing a function parameter.
+Each additional element of the list should specify either an attribute or an index of the previous element.
+The last element's string representation is used as the lock_name element.
+To give an example that showcases everything possible, `["self", "obj1", "dict1", "list1", 0]` would 
+look for `self.obj1.dict1["list1"][0]` when generating the lock name.
 
 ## Examples
 ```python
@@ -62,9 +66,9 @@ def hard_name(arg, kwarg):
     # lock_name would be hard_name:hard_code_name
     pass
 
-@lock(lock_name=["kwarg"])
+@lock(lock_name=["kwarg", "arg"])
 def kwarg(arg, kwarg):
-    # lock_name would be kwarg:<kwarg>
+    # lock_name would be kwarg:<kwarg>:<arg>
     pass
 
 @lock(timeout=20)
@@ -75,9 +79,9 @@ def timeout(arg, kwarg):
 def blocking(arg, kwarg):
     pass
 
-@lock(lock_name=["id", "debug"], timeout=30, cache='other', blocking=True)
+@lock(lock_name=[["self", "name_list", 1], "debug"], timeout=30, cache='other', blocking=True)
 def combination(self, preview_return_url=None, language_code='en', is_resend=False, debug=False):
-    # lock_name would be combination:<self.id>:<debug>
+    # lock_name would be combination:<self.name_list[1]>:<debug>
     # timeout would be 30 sec instead of 60 sec
     # lock would attempt to use a Django cache named 'other'
     # lock would be blocking
