@@ -71,7 +71,8 @@ def lock(*args, **options):
 
             lock = caches[options.get('cache','default')].lock(lock_name, timeout=options.get('timeout',60))
             if not lock.acquire(options.get('blocking', False)):
-                print(f'{lock_name} lock already acquired...return')
+                if options.get('debug', False):
+                    print(f'{lock_name} lock already acquired...return')
                 return
 
             return func(*args, **kwargs)

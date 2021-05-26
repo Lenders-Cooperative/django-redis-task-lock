@@ -8,6 +8,7 @@ that can be passed to the decorator in any order as kwargs to modify the propert
 | timeout | int | 60 | The timeout of the lock |
 | blocking | bool | False | Set whether the lock is blocking or not |
 | cache | str | 'default' | The Django cache to lock |
+| debug | bool | False | Toggle debug output |
 
 Note: If no value for lock_name is passed, the lock name will be auto-generated.
 The generated name is based on all args and kwargs in the order they are passed
