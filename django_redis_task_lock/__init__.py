@@ -3,6 +3,9 @@ from functools import wraps
 from inspect import getfullargspec
 from django.core.cache import caches
 
+class PriorityList(list):
+    pass
+
 def __attr_finder(obj, attr_list):
     attr = attr_list[0]
     if type(attr) is str and hasattr(obj, attr):
@@ -31,25 +34,56 @@ def lock(*args, **options):
                 if type(options["lock_name"]) is str:
                     lock_name = options["lock_name"]
                 elif type(options["lock_name"]) is list:
+                    arg_spec = getfullargspec(func)
+                    param_list = arg_spec[0]
+                    defaults = arg_spec[3]
                     for var in options["lock_name"]:
-                        if type(var) is str:
-                            if var in kwargs:
+                        if type(var) is str:   # If specifying single parameter
+                            if var in kwargs:  # If parameter is in kwargs
                                 lock_name += ":" + str(kwargs[var])
-                            elif var in getfullargspec(func)[0]:
-                                arg_index = getfullargspec(func)[0].index(var)
-                                lock_name += ":" + str(args[arg_index])
-                            else:
-                                message = f'\nThe lock decorator is configured incorrectly. Could not find parameter "{var}" in function call'
+                            elif var in param_list:   # If parameter is a real arg
+                                arg_index = param_list.index(var)
+                                if len(args) > arg_index:    # If the parameter is passed positionally in args
+                                    lock_name += ":" + str(args[arg_index])
+                                else:   # The parameter is using a default value
+                                    default_index = param_list[-len(defaults):].index(var)
+                                    lock_name += ":" + str(defaults[default_index])
+                            else:  # The parameter specified isn't an argument of the function
+                                message = f'\nThe lock decorator is configured incorrectly. Could not find parameter "{var}" in function call or definition'
                                 raise ValueError(message)
-                        elif type(var) is list:
+                        elif type(var) is PriorityList:  # If specifying a priority list
+                            for param_name in var:
+                                if param_name in kwargs:
+                                    if kwargs[param_name]:  # If the param has a value
+                                        lock_name += ":" + str(kwargs[param_name])
+                                        break
+                                elif param_name in param_list:
+                                    arg_index = param_list.index(param_name)
+                                    if len(args) > arg_index:
+                                        if args[arg_index]:
+                                            lock_name += ":" + str(args[arg_index])
+                                            break
+                                    else:
+                                        default_index = param_list[-len(defaults):].index(param_name)
+                                        if defaults[default_index]:
+                                            lock_name += ":" + str(defaults[default_index])
+                                            break
+                                else:
+                                    message = f'\nThe lock decorator is configured incorrectly. Could not find parameter "{param_name}" within PriorityList {var} in function call or definition'
+                                    raise ValueError(message)
+                        elif type(var) is list:  # If specifying an attribute chain
                             param_name = var[0]
                             if param_name in kwargs:
                                 lock_name += ":" + __attr_finder(kwargs[param_name], var[1:])
-                            elif param_name in getfullargspec(func)[0]:
-                                arg_index = getfullargspec(func)[0].index(param_name)
-                                lock_name += ":" + __attr_finder(args[arg_index], var[1:])
+                            elif param_name in param_list:
+                                arg_index = param_list.index(param_name)
+                                if len(args) > arg_index:
+                                    lock_name += ":" + __attr_finder(args[arg_index], var[1:])
+                                else:
+                                    default_index = param_list[-len(defaults):].index(param_name)
+                                    lock_name += ":" + __attr_finder(defaults[default_index], var[1:])
                             else:
-                                message = f'\nThe lock decorator is configured incorrectly. Could not find parameter "{param_name}" in function call'
+                                message = f'\nThe lock decorator is configured incorrectly. Could not find parameter "{param_name}" in function call or definition'
                                 raise ValueError(message)
                         else:
                             message = f'\nThe lock decorator is configured incorrectly. "{type(var)}" is not a valid type for specifying a lock name'
