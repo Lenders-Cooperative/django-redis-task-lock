@@ -1,5 +1,5 @@
 # Django Redis Task Lock
-This is a redis task lock decorator for django celery tasks. There are four options
+This is a redis task lock decorator for django celery tasks. There are several options
 that can be passed to the decorator in any order as kwargs to modify the properties of the lock.
 
 | Option name | Type | Default value | Description |
