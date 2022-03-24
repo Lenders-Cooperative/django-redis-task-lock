@@ -2,13 +2,14 @@
 This is a redis task lock decorator for django celery tasks. There are several options
 that can be passed to the decorator in any order as kwargs to modify the properties of the lock.
 
-| Option name | Type | Default value | Description |
-| --- | --- | --- | --- |
-| lock_name | str / list[str, list, PriorityList] | *See note below* | The name of the redis lock |
-| timeout | int | 60 | The timeout of the lock |
-| blocking | bool | False | Set whether the lock is blocking or not |
-| cache | str | 'default' | The Django cache to lock |
-| debug | bool | False | Toggle debug output |
+| Option name | Type                                | Default value   | Description                                |
+|--------|-------------------------------------|-----------------|--------------------------------------------|
+| lock_name | str / list[str, list, PriorityList] | *See note below* | The name of the redis lock                 |
+| timeout | int                                 | 60              | The timeout of the lock                    |
+| blocking | bool                                | False           | Set whether the lock is blocking or not    |
+| cache  | str                                 | 'default'       | The Django cache to lock                   |
+| debug  | bool                                | False           | Toggle debug output                        |
+| locked | mixed                               | `None`            | Value to return when lock already acquired |
 
 Note: If no value for lock_name is passed, the lock name will be auto-generated.
 The generated name is based on all args and kwargs in the order they are passed

@@ -107,7 +107,8 @@ def lock(*args, **options):
             if not lock.acquire(options.get('blocking', False)):
                 if options.get('debug', False):
                     print(f'{lock_name} lock already acquired...return')
-                return
+
+                return options.get("locked", None)
 
             return func(*args, **kwargs)
         return __wrapper
