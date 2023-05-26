@@ -12,11 +12,13 @@ class PriorityList(list):
 
 def __attr_finder(obj, attr_list):
     """
-    Recursively searches for attributes or keys in an object based on the provided attribute list.
+    Recursively searches for attributes or
+    keys in an object based on the provided attribute list.
 
     Args:
         obj (object): The object in which to search for attributes or keys.
-        attr_list (list): A list of attributes or keys to search for in the object.
+        attr_list (list): A list of attributes or
+        keys to search for in the object.
 
     Returns:
         str: The value of the found attribute or key, converted to a string.
@@ -79,7 +81,8 @@ def lock(*args, **options):
             **kwargs: Keyword arguments passed to the decorated function.
 
         Yields:
-            Any: The value specified by the "locked" option if the lock cannot be acquired, otherwise no value is yielded.
+            Any: The value specified by the "locked" option if the lock cannot be acquired,
+            otherwise no value is yielded.
         """
         options = {
             "debug": kwargs.pop("debug", False),
@@ -108,7 +111,8 @@ def lock(*args, **options):
 
 def construct_lock_name(func, args, options, **kwargs):
     """
-    Constructs a lock name based on the specified function, arguments, options, and keyword arguments.
+    Constructs a lock name based on the specified function,
+    arguments, options, and keyword arguments.
 
     Args:
         func (callable): The function for which the lock name is being constructed.
@@ -120,7 +124,8 @@ def construct_lock_name(func, args, options, **kwargs):
         str: The constructed lock name.
 
     Raises:
-        ValueError: If the lock decorator is configured incorrectly and a parameter or PriorityList element is not found.
+        ValueError: If the lock decorator is configured incorrectly and 
+        a parameter or PriorityList element is not found.
         TypeError: If an invalid type is used to specify a lock name.
     """
     default_str_regex = "<.*object at.*>"
@@ -135,23 +140,23 @@ def construct_lock_name(func, args, options, **kwargs):
             param_list = arg_spec[0]
             defaults = arg_spec[3]
             for var in options["lock_name"]:
-                if type(var) is str:
-                    if var in kwargs:
+                if type(var) is str:  # If specifying single parameter
+                    if var in kwargs:  # If parameter is in kwargs
                         lock_name += ":" + str(kwargs[var])
-                    elif var in param_list:
+                    elif var in param_list:  # If parameter is a real arg
                         arg_index = param_list.index(var)
-                        if len(args) > arg_index:
+                        if len(args) > arg_index:  # If the parameter is passed positionally in args
                             lock_name += ":" + str(args[arg_index])
-                        else:
-                            default_index = param_list[-len(defaults) :].index(var)
+                        else:  # The parameter is using a default value
+                            default_index = param_list[-len(defaults):].index(var)
                             lock_name += ":" + str(defaults[default_index])
-                    else:
+                    else:  # The parameter specified isn't an argument of the function
                         message = f'\nThe lock decorator is configured incorrectly. Could not find parameter "{var}" in function call or definition'
                         raise ValueError(message)
-                elif type(var) is list:
+                elif type(var) is PriorityList:  # If specifying a priority list
                     for param_name in var:
                         if param_name in kwargs:
-                            if kwargs[param_name]:
+                            if kwargs[param_name]:  # If the param has a value
                                 lock_name += ":" + str(kwargs[param_name])
                                 break
                         elif param_name in param_list:
@@ -161,14 +166,14 @@ def construct_lock_name(func, args, options, **kwargs):
                                     lock_name += ":" + str(args[arg_index])
                                     break
                             else:
-                                default_index = param_list[-len(defaults) :].index(param_name)
+                                default_index = param_list[-len(defaults):].index(param_name)
                                 if defaults[default_index]:
                                     lock_name += ":" + str(defaults[default_index])
                                     break
                         else:
                             message = f'\nThe lock decorator is configured incorrectly. Could not find parameter "{param_name}" within PriorityList {var} in function call or definition'
                             raise ValueError(message)
-                elif type(var) is list:
+                elif type(var) is list:  # If specifying an attribute chain
                     param_name = var[0]
                     if param_name in kwargs:
                         lock_name += ":" + __attr_finder(kwargs[param_name], var[1:])
@@ -177,7 +182,7 @@ def construct_lock_name(func, args, options, **kwargs):
                         if len(args) > arg_index:
                             lock_name += ":" + __attr_finder(args[arg_index], var[1:])
                         else:
-                            default_index = param_list[-len(defaults) :].index(param_name)
+                            default_index = param_list[-len(defaults):].index(param_name)
                             lock_name += ":" + __attr_finder(defaults[default_index], var[1:])
                     else:
                         message = f'\nThe lock decorator is configured incorrectly. Could not find parameter "{param_name}" in function call or definition'
@@ -212,7 +217,8 @@ def acquire_lock(lock_name, options):
         options (dict): A dictionary of options for acquiring the lock.
 
     Returns:
-        Lock or None: The acquired lock object if successful, or None if the lock is already acquired.
+        Lock or None: The acquired lock object if successful,
+        or None if the lock is already acquired.
     """
 
     # Code block where the lock is acquired
