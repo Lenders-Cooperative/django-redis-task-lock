@@ -11,6 +11,19 @@ class PriorityList(list):
 
 
 def __attr_finder(obj, attr_list):
+    """
+    Recursively searches for attributes or keys in an object based on the provided attribute list.
+
+    Args:
+        obj (object): The object in which to search for attributes or keys.
+        attr_list (list): A list of attributes or keys to search for in the object.
+
+    Returns:
+        str: The value of the found attribute or key, converted to a string.
+
+    Raises:
+        KeyError: If the specified attribute or key is not found in the object.
+    """
     attr = attr_list[0]
     if type(attr) is str and hasattr(obj, attr):
         attr_val = getattr(obj, attr)
@@ -31,6 +44,16 @@ def __attr_finder(obj, attr_list):
 
 def lock(*args, **options):
     def _lock(func):
+        """
+        Decorator function that wraps the specified function with locking functionality.
+
+        Args:
+            func (callable): The function to be decorated.
+
+        Returns:
+            callable: The wrapped function with locking functionality.
+        """
+
         @wraps(func)
         def __wrapper(*args, **kwargs):
             lock_name = construct_lock_name(func, args, options, **kwargs)
@@ -47,6 +70,17 @@ def lock(*args, **options):
 
     @contextmanager
     def _lock_context(func, *args, **kwargs):
+        """
+        Context manager that acquires a lock and yields control to the enclosed block.
+
+        Args:
+            func (callable): The function being decorated.
+            *args: Positional arguments passed to the decorated function.
+            **kwargs: Keyword arguments passed to the decorated function.
+
+        Yields:
+            Any: The value specified by the "locked" option if the lock cannot be acquired, otherwise no value is yielded.
+        """
         options = {
             "debug": kwargs.pop("debug", False),
             "cache": kwargs.pop("cache", "default"),
@@ -73,6 +107,22 @@ def lock(*args, **options):
 
 
 def construct_lock_name(func, args, options, **kwargs):
+    """
+    Constructs a lock name based on the specified function, arguments, options, and keyword arguments.
+
+    Args:
+        func (callable): The function for which the lock name is being constructed.
+        args (tuple): The positional arguments passed to the function.
+        options (dict): A dictionary of options for constructing the lock name.
+        **kwargs: Keyword arguments passed to the function.
+
+    Returns:
+        str: The constructed lock name.
+
+    Raises:
+        ValueError: If the lock decorator is configured incorrectly and a parameter or PriorityList element is not found.
+        TypeError: If an invalid type is used to specify a lock name.
+    """
     default_str_regex = "<.*object at.*>"
     default_repr_regex = default_str_regex
     lock_name = f"{func.__name__}"
@@ -154,6 +204,17 @@ def construct_lock_name(func, args, options, **kwargs):
 
 
 def acquire_lock(lock_name, options):
+    """
+    Acquires a lock using the specified lock name and options.
+
+    Args:
+        lock_name (str): The name of the lock to acquire.
+        options (dict): A dictionary of options for acquiring the lock.
+
+    Returns:
+        Lock or None: The acquired lock object if successful, or None if the lock is already acquired.
+    """
+
     # Code block where the lock is acquired
     lock = caches[options.get("cache", "default")].lock(lock_name, timeout=options.get("timeout", 60))
     # Checks if the lock is already acquired
