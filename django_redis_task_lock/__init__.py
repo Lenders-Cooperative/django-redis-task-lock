@@ -58,7 +58,7 @@ def lock(*args, **options):
 
         @wraps(func)
         def __wrapper(*args, **kwargs):
-            lock_name = construct_lock_name(func, args, options, **kwargs)
+            lock_name = construct_lock_name(func, args, kwargs, **options)
             lock = acquire_lock(lock_name, options)
             if lock is None:
                 return options.get("locked", None)
@@ -71,7 +71,7 @@ def lock(*args, **options):
         return __wrapper
 
     @contextmanager
-    def _lock_context(func, *args, **kwargs):
+    def _lock_context(func, args, kwargs, **options):
         """
         Context manager that acquires a lock and yields control to the enclosed block.
 
@@ -93,7 +93,7 @@ def lock(*args, **options):
             "lock_name": kwargs.pop("lock_name", []),
         }
         kwargs["options"] = options
-        lock_name = construct_lock_name(func, args, **kwargs)
+        lock_name = construct_lock_name(func, args, kwargs, **options)
         lock = acquire_lock(lock_name, options)
         if lock is None:
             yield options.get("locked", None)
@@ -109,7 +109,7 @@ def lock(*args, **options):
     return _lock
 
 
-def construct_lock_name(func, args, options, **kwargs):
+def construct_lock_name(func, args, kwargs, **options):
     """
     Constructs a lock name based on the specified function,
     arguments, options, and keyword arguments.
