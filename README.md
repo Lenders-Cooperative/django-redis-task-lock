@@ -1,6 +1,8 @@
 # Django Redis Task Lock
-This is a redis task lock decorator for django celery tasks. There are several options
-that can be passed to the decorator in any order as kwargs to modify the properties of the lock.
+This is a redis task lock for django celery tasks. There are several options
+that can be passed to the function in any order as kwargs to modify the properties of the lock.
+
+The lock function automatically determines whether it should be used as a decorator or a context manager based on its usage. If it is called without any arguments, it behaves as a decorator. If it is called with a single argument that is a callable, it behaves as a context manager for that function.
 
 | Option name | Type                                | Default value   | Description                                |
 |--------|-------------------------------------|-----------------|--------------------------------------------|
@@ -119,4 +121,14 @@ def combination(self, url=None, language='en', is_resend=False, debug=False):
     # decorator would print debug information
     pass
 
+```
+### Usage as a Context Manager
+```python
+def function(args, kwarg):
+    with lock(function, args=args, kwargs=kwargs, **options) as lock:
+        if lock is not None:
+            return lock # return lock text
+        else:
+            #task
+            pass
 ```
