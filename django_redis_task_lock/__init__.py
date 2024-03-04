@@ -66,7 +66,11 @@ def lock(*args, **options):
                 return func(*args, **kwargs)
             finally:
                 # Can optionally release the lock here
-                pass
+                if options.get("release_on_completion", False) is True:
+                    try:
+                        lock.release()
+                    except Exception:
+                        pass
 
         return __wrapper
 
@@ -91,7 +95,9 @@ def lock(*args, **options):
             "blocking": kwargs.pop("blocking", False),
             "timeout": kwargs.pop("timeout", 60),
             "lock_name": kwargs.pop("lock_name", []),
+            "release_on_completion": kwargs.pop("release_on_completion", False),
         }
+
         kwargs["options"] = options
         lock_name = construct_lock_name(func, args, kwargs, **options)
         lock = acquire_lock(lock_name, options)
@@ -102,7 +108,11 @@ def lock(*args, **options):
                 yield
             finally:
                 # Can optionally release the lock here
-                pass
+                if options["release_on_completion"] is True:
+                    try:
+                        lock.release()
+                    except Exception:
+                        pass
 
     if len(args) == 1 and callable(args[0]):
         return _lock_context(args[0], **options)
@@ -124,7 +134,7 @@ def construct_lock_name(func, args, kwargs, **options):
         str: The constructed lock name.
 
     Raises:
-        ValueError: If the lock decorator is configured incorrectly and 
+        ValueError: If the lock decorator is configured incorrectly and
         a parameter or PriorityList element is not found.
         TypeError: If an invalid type is used to specify a lock name.
     """
