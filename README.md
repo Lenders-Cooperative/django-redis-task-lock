@@ -1,17 +1,19 @@
 # Django Redis Task Lock
+
 This is a redis task lock for django celery tasks. There are several options
 that can be passed to the function in any order as kwargs to modify the properties of the lock.
 
 The lock function automatically determines whether it should be used as a decorator or a context manager based on its usage. If it is called without any arguments, it behaves as a decorator. If it is called with a single argument that is a callable, it behaves as a context manager for that function.
 
-| Option name | Type                                | Default value   | Description                                |
-|--------|-------------------------------------|-----------------|--------------------------------------------|
-| lock_name | str / list[str, list, PriorityList] | *See note below* | The name of the redis lock                 |
-| timeout | int                                 | 60              | The timeout of the lock                    |
-| blocking | bool                                | False           | Set whether the lock is blocking or not    |
-| cache  | str                                 | 'default'       | The Django cache to lock                   |
-| debug  | bool                                | False           | Toggle debug output                        |
-| locked | mixed                               | `None`            | Value to return when lock already acquired |
+| Option name           | Type                                | Default value    | Description                                                                  |
+| --------------------- | ----------------------------------- | ---------------- | ---------------------------------------------------------------------------- |
+| lock_name             | str / list[str, list, PriorityList] | _See note below_ | The name of the redis lock                                                   |
+| timeout               | int                                 | 60               | The timeout of the lock                                                      |
+| blocking              | bool                                | False            | Set whether the lock is blocking or not                                      |
+| cache                 | str                                 | 'default'        | The Django cache to lock                                                     |
+| debug                 | bool                                | False            | Toggle debug output                                                          |
+| locked                | mixed                               | `None`           | Value to return when lock already acquired                                   |
+| release_on_completion | bool                                | `False`          | Release the lock when the task completes if the timeout has not been reached |
 
 Note: If no value for lock_name is passed, the lock name will be auto-generated.
 The generated name is based on all args and kwargs in the order they are passed
@@ -20,22 +22,27 @@ For a function call such as `foo(1, 'temp', bar9=4, bar8=3)`, the lock_name woul
 If a parameter is a type with only the default `__str__` or `__repr__`, it will not be included in the name.
 
 ## `lock_name` Explanation
-lock_name is the option with the most flexibility depending on user needs. 
+
+lock_name is the option with the most flexibility depending on user needs.
 This option allows the user to either hard-code the lock name or use a subset of available parameters.
 
 ### Hard-coded Lock name
+
 To hard-code the lock name, pass a string with the desired name.
 
 ### Variable Lock Name
+
 By default, the name generator will use all valid args & kwargs.
 Passing a list allows the user to instead select a subset of available parameters.
 Elements of this list must either be strings, lists, or Priority Lists.
 
 #### Strings
-A string element indicates a *function parameter* should be part of the lock name.
+
+A string element indicates a _function parameter_ should be part of the lock name.
 
 #### Lists
-A list element indicates an *attribute or element of a function parameter* an arbitrary number of layers deep 
+
+A list element indicates an _attribute or element of a function parameter_ an arbitrary number of layers deep
 should be part of the lock name.
 This functionality is best explained in broad terms with some examples.
 
@@ -43,7 +50,7 @@ This functionality is best explained in broad terms with some examples.
 class ClassExample:
     def __init__(self):
         self.id = 27
-    
+
     @lock(lock_name=['arg1', ['self', 'id']])
     def foo(self, arg1):
         pass
@@ -61,11 +68,12 @@ Using a list to specify an element of the lock name is very flexible.
 The first element should be a string specifing a function parameter.
 Each additional element of the list should specify either an attribute or an index of the previous element.
 The last element's string representation is used as the lock_name element.
-To give an example that showcases everything possible, `["self", "obj1", "dict1", "list1", 0]` would 
+To give an example that showcases everything possible, `["self", "obj1", "dict1", "list1", 0]` would
 look for `self.obj1.dict1["list1"][0]` when generating the lock name.
 
 #### Priority Lists
-A Priority List indicates *the first function parameter in the priority list that evaluates to True* should be part of the lock name.
+
+A Priority List indicates _the first function parameter in the priority list that evaluates to True_ should be part of the lock name.
 `PriorityList` is a custom class included in the package.
 It is functionally identical to python's built-in list type, but serves to mark a list for special evaluation when generating the lock name.
 When a Priority List is being evaluated, the first parameter found with a value equivalent to True is used in the lock name.
@@ -80,6 +88,7 @@ If `bar` also evaluated to False, the lock name would be `<func_name>`.
 A normal list can not be an element of a priority list.
 
 ## Examples
+
 ```python
 @lock
 def plain(arg, kwarg):
@@ -122,7 +131,9 @@ def combination(self, url=None, language='en', is_resend=False, debug=False):
     pass
 
 ```
+
 ### Usage as a Context Manager
+
 ```python
 def function(args, kwarg):
     with lock(function, args=args, kwargs=kwargs, **options) as lock:
