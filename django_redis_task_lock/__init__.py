@@ -155,10 +155,12 @@ def construct_lock_name(func, args, kwargs, **options):
                         lock_name += ":" + str(kwargs[var])
                     elif var in param_list:  # If parameter is a real arg
                         arg_index = param_list.index(var)
-                        if len(args) > arg_index:  # If the parameter is passed positionally in args
+                        if (
+                            len(args) > arg_index
+                        ):  # If the parameter is passed positionally in args
                             lock_name += ":" + str(args[arg_index])
                         else:  # The parameter is using a default value
-                            default_index = param_list[-len(defaults):].index(var)
+                            default_index = param_list[-len(defaults) :].index(var)
                             lock_name += ":" + str(defaults[default_index])
                     else:  # The parameter specified isn't an argument of the function
                         message = f'\nThe lock decorator is configured incorrectly. Could not find parameter "{var}" in function call or definition'
@@ -176,7 +178,9 @@ def construct_lock_name(func, args, kwargs, **options):
                                     lock_name += ":" + str(args[arg_index])
                                     break
                             else:
-                                default_index = param_list[-len(defaults):].index(param_name)
+                                default_index = param_list[-len(defaults) :].index(
+                                    param_name
+                                )
                                 if defaults[default_index]:
                                     lock_name += ":" + str(defaults[default_index])
                                     break
@@ -192,8 +196,12 @@ def construct_lock_name(func, args, kwargs, **options):
                         if len(args) > arg_index:
                             lock_name += ":" + __attr_finder(args[arg_index], var[1:])
                         else:
-                            default_index = param_list[-len(defaults):].index(param_name)
-                            lock_name += ":" + __attr_finder(defaults[default_index], var[1:])
+                            default_index = param_list[-len(defaults) :].index(
+                                param_name
+                            )
+                            lock_name += ":" + __attr_finder(
+                                defaults[default_index], var[1:]
+                            )
                     else:
                         message = f'\nThe lock decorator is configured incorrectly. Could not find parameter "{param_name}" in function call or definition'
                         raise ValueError(message)
@@ -232,10 +240,15 @@ def acquire_lock(lock_name, options):
     """
 
     # Code block where the lock is acquired
-    lock = caches[options.get("cache", "default")].lock(lock_name, timeout=options.get("timeout", 60))
+    lock = caches[options.get("cache", "default")].lock(
+        lock_name, timeout=options.get("timeout", 60)
+    )
+
     # Checks if the lock is already acquired
-    if not lock.acquire(options.get("blocking", False)):
+    blocking = options.get("blocking", False)
+    if not lock.acquire(blocking=blocking):
         if options.get("debug", False):
             print(f"{lock_name} lock already acquired...return")
         return None
+
     return lock
