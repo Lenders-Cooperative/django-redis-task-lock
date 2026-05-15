@@ -1,4 +1,3 @@
-import unittest
 import sys
 import types
 
@@ -40,55 +39,55 @@ class FakeCache:
         return self.created_lock
 
 
-class AcquireLockTests(unittest.TestCase):
-    def setUp(self):
-        self.original_caches = django_redis_task_lock.caches
+def test_acquire_lock_passes_blocking_as_keyword(monkeypatch):
+    redis_lock = FakeLock(acquired=False)
+    monkeypatch.setattr(
+        django_redis_task_lock,
+        "caches",
+        {"default": FakeCache(redis_lock)},
+    )
 
-    def tearDown(self):
-        django_redis_task_lock.caches = self.original_caches
+    lock = django_redis_task_lock.acquire_lock(
+        "task-lock",
+        {"blocking": False, "timeout": 60},
+    )
 
-    def test_acquire_lock_passes_blocking_as_keyword(self):
-        redis_lock = FakeLock(acquired=False)
-        django_redis_task_lock.caches = {"default": FakeCache(redis_lock)}
-
-        lock = django_redis_task_lock.acquire_lock(
-            "task-lock",
-            {"blocking": False, "timeout": 60},
-        )
-
-        self.assertIsNone(lock)
-        self.assertEqual(redis_lock.acquire_args, ())
-        self.assertEqual(redis_lock.acquire_kwargs, {"blocking": False})
-
-    def test_acquire_lock_uses_configured_cache_and_timeout(self):
-        redis_lock = FakeLock(acquired=True)
-        cache = FakeCache(redis_lock)
-        django_redis_task_lock.caches = {"tasks": cache}
-
-        lock = django_redis_task_lock.acquire_lock(
-            "task-lock",
-            {"cache": "tasks", "blocking": True, "timeout": 120},
-        )
-
-        self.assertIs(lock, redis_lock)
-        self.assertEqual(cache.lock_name, "task-lock")
-        self.assertEqual(cache.lock_timeout, 120)
-        self.assertEqual(redis_lock.acquire_kwargs, {"blocking": True})
-
-    def test_acquire_lock_passes_modern_redis_lock_options(self):
-        redis_lock = FakeLock(acquired=True)
-        django_redis_task_lock.caches = {"default": FakeCache(redis_lock)}
-
-        django_redis_task_lock.acquire_lock(
-            "task-lock",
-            {"blocking": True, "blocking_timeout": 5, "sleep": 0.1},
-        )
-
-        self.assertEqual(
-            redis_lock.acquire_kwargs,
-            {"blocking": True, "blocking_timeout": 5, "sleep": 0.1},
-        )
+    assert lock is None
+    assert redis_lock.acquire_args == ()
+    assert redis_lock.acquire_kwargs == {"blocking": False}
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_acquire_lock_uses_configured_cache_and_timeout(monkeypatch):
+    redis_lock = FakeLock(acquired=True)
+    cache = FakeCache(redis_lock)
+    monkeypatch.setattr(django_redis_task_lock, "caches", {"tasks": cache})
+
+    lock = django_redis_task_lock.acquire_lock(
+        "task-lock",
+        {"cache": "tasks", "blocking": True, "timeout": 120},
+    )
+
+    assert lock is redis_lock
+    assert cache.lock_name == "task-lock"
+    assert cache.lock_timeout == 120
+    assert redis_lock.acquire_kwargs == {"blocking": True}
+
+
+def test_acquire_lock_passes_modern_redis_lock_options(monkeypatch):
+    redis_lock = FakeLock(acquired=True)
+    monkeypatch.setattr(
+        django_redis_task_lock,
+        "caches",
+        {"default": FakeCache(redis_lock)},
+    )
+
+    django_redis_task_lock.acquire_lock(
+        "task-lock",
+        {"blocking": True, "blocking_timeout": 5, "sleep": 0.1},
+    )
+
+    assert redis_lock.acquire_kwargs == {
+        "blocking": True,
+        "blocking_timeout": 5,
+        "sleep": 0.1,
+    }

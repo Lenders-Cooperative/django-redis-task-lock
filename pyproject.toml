@@ -1,6 +1,30 @@
-[build-system]
-requires = [
-    "setuptools>=42",
-    "wheel"
+[tool.poetry]
+name = "django-redis-task-lock"
+version = "0.8.1"
+description = "Redis task lock decorator for django celery tasks"
+authors = ["Levi Anderson"]
+license = "BSD"
+readme = "README.md"
+repository = "https://github.com/Lenders-Cooperative/django-redis-task-lock"
+packages = [{ include = "django_redis_task_lock" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Framework :: Django :: 4.2",
+    "Framework :: Django :: 5.2",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
 ]
-build-backend = "setuptools.build_meta"
+
+[tool.poetry.dependencies]
+python = ">=3.8,<4.0"
+django = ">=3.2.15,<6.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.4,<9.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["poetry-core>=1.8.0"]
+build-backend = "poetry.core.masonry.api"
