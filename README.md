@@ -10,6 +10,8 @@ The lock function automatically determines whether it should be used as a decora
 | lock_name             | str / list[str, list, PriorityList] | _See note below_ | The name of the redis lock                                                   |
 | timeout               | int                                 | 60               | The timeout of the lock                                                      |
 | blocking              | bool                                | False            | Set whether the lock is blocking or not                                      |
+| blocking_timeout      | float / None                        | _redis default_  | Maximum seconds a blocking acquire waits before returning                    |
+| sleep                 | float / None                        | _redis default_  | Seconds to sleep between blocking acquire attempts                           |
 | cache                 | str                                 | 'default'        | The Django cache to lock                                                     |
 | debug                 | bool                                | False            | Toggle debug output                                                          |
 | locked                | mixed                               | `None`           | Value to return when lock already acquired                                   |

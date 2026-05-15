@@ -2,3 +2,6 @@ dist/*
 build/*
 django_redis_task_lock.egg-info/*
 .idea/*
+__pycache__/
+*.py[cod]
+.pytest_cache/

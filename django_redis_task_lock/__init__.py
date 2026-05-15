@@ -97,6 +97,10 @@ def lock(*args, **options):
             "lock_name": kwargs.pop("lock_name", []),
             "release_on_completion": kwargs.pop("release_on_completion", False),
         }
+        if "blocking_timeout" in kwargs:
+            options["blocking_timeout"] = kwargs.pop("blocking_timeout")
+        if "sleep" in kwargs:
+            options["sleep"] = kwargs.pop("sleep")
 
         kwargs["options"] = options
         lock_name = construct_lock_name(func, args, kwargs, **options)
@@ -245,8 +249,13 @@ def acquire_lock(lock_name, options):
     )
 
     # Checks if the lock is already acquired
-    blocking = options.get("blocking", False)
-    if not lock.acquire(blocking=blocking):
+    acquire_kwargs = {"blocking": options.get("blocking", False)}
+    if "blocking_timeout" in options:
+        acquire_kwargs["blocking_timeout"] = options["blocking_timeout"]
+    if "sleep" in options:
+        acquire_kwargs["sleep"] = options["sleep"]
+
+    if not lock.acquire(**acquire_kwargs):
         if options.get("debug", False):
             print(f"{lock_name} lock already acquired...return")
         return None
