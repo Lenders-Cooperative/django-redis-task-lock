@@ -1,0 +1,68 @@
+exclude: "dist|.tox|.pytest_cache|.git"
+default_stages: [commit]
+fail_fast: true
+
+repos:
+  - repo: https://github.com/psf/black
+    rev: 24.2.0
+    hooks:
+      - id: black
+        exclude: ^.*\b(migrations)\b.*$
+        args: ["--target-version", "py310"]
+
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.3.1
+    hooks:
+      - id: pyupgrade
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: mixed-line-ending
+
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.12.0
+    hooks:
+      - id: isort
+
+  - repo: https://github.com/PyCQA/flake8
+    # version update to resolve E231 error within strings
+    # https://stackoverflow.com/a/77402153
+    rev: 7.1.0
+    hooks:
+      - id: flake8
+        args: ["--ignore=E501,W503,F403,F405,E203,E704"]
+        exclude: 'init_local.py|thomsonreuters_clear\/vendor\/'
+        additional_dependencies: [flake8-isort]
+
+  - repo: https://github.com/econchick/interrogate
+    rev: 1.7.0
+    hooks:
+      - id: interrogate
+        args: [--config=pyproject.toml]
+        pass_filenames: true
+        exclude: "tests/|^stgcore/sample_app|app_settings.py|error_codes.py|__init__.py|thomsonreuters_clear\/vendor\/"
+
+  - repo: https://github.com/yunojuno/pre-commit-xenon
+    rev: cc59b0431a5d072786b59430e9b342b2881064f6
+    hooks:
+      - id: xenon
+        args: ["--max-average=F", "--max-modules=F", "--max-absolute=F"]
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+        exclude: "^tests/|.pre-commit-config.yaml|pyproject.toml|stgcore/sample_app/compose/"
+
+# sets up .pre-commit-ci.yaml to ensure pre-commit dependencies stay up to date
+ci:
+  autoupdate_schedule: weekly
+  skip: [pylint]
+  submodules: false
