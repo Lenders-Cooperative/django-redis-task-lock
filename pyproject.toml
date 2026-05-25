@@ -1,6 +1,70 @@
-[build-system]
-requires = [
-    "setuptools>=42",
-    "wheel"
+[project]
+name = "django-redis-task-lock"
+version = "0.8"
+description = "Redis task lock decorator for Django Celery tasks"
+readme = "README.md"
+license = "BSD-3-Clause"
+authors = [{ name = "Levi Anderson" }]
+keywords = ["django", "redis", "celery", "locking", "tasks"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Framework :: Django",
+    "Framework :: Django :: 2.2",
+    "Framework :: Django :: 3.2",
+    "Framework :: Django :: 4.2",
+    "Framework :: Django :: 5.2",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
-build-backend = "setuptools.build_meta"
+requires-python = ">=3.10,<4.0"
+dependencies = [
+    "django>=2.2,<6.0",
+    "structlog>=21.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Lenders-Cooperative/django-redis-task-lock"
+Repository = "https://github.com/Lenders-Cooperative/django-redis-task-lock"
+
+[tool.poetry]
+packages = [{ include = "django_redis_task_lock" }]
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0"
+
+[tool.tox]
+requires = ["tox>=4.19"]
+env_list = ["dj42", "dj52"]
+
+[tool.tox.env_run_base]
+description = "Run pytest against {env_name}"
+package = "wheel"
+wheel_build_env = ".pkg"
+commands = [["pytest", "-q"]]
+
+[tool.tox.env.dj42]
+description = "Run tests with Django 4.2"
+deps = [
+    "django>=4.2,<4.3",
+    "pytest>=8.0",
+]
+
+[tool.tox.env.dj52]
+description = "Run tests with Django 5.2"
+deps = [
+    "django>=5.2,<5.3",
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["poetry-core>=1.8.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.isort]
+profile = "black"
+atomic = true

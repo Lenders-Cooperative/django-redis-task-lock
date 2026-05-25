@@ -1,0 +1,21 @@
+name: pytest
+
+on:
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  tests:
+    name: tox
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.11
+    steps:
+      - name: Check out repository
+        uses: thesummitgrp-repo/actions-checkout@v4
+
+      - name: Install tox
+        run: python -m pip install --upgrade pip tox
+
+      - name: Run tox matrix
+        run: python3 -m tox

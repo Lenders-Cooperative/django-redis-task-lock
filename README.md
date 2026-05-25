@@ -1,145 +1,222 @@
 # Django Redis Task Lock
 
-This is a redis task lock for django celery tasks. There are several options
-that can be passed to the function in any order as kwargs to modify the properties of the lock.
+`django_redis_task_lock` provides a small locking helper for Django code that uses
+Redis-backed Django cache locks. It supports both decorator and context-manager
+usage and is used heavily around Celery task execution in this repository.
 
-The lock function automatically determines whether it should be used as a decorator or a context manager based on its usage. If it is called without any arguments, it behaves as a decorator. If it is called with a single argument that is a callable, it behaves as a context manager for that function.
+## Behavior
 
-| Option name           | Type                                | Default value    | Description                                                                  |
-| --------------------- | ----------------------------------- | ---------------- | ---------------------------------------------------------------------------- |
-| lock_name             | str / list[str, list, PriorityList] | _See note below_ | The name of the redis lock                                                   |
-| timeout               | int                                 | 60               | The timeout of the lock                                                      |
-| blocking              | bool                                | False            | Set whether the lock is blocking or not                                      |
-| cache                 | str                                 | 'default'        | The Django cache to lock                                                     |
-| debug                 | bool                                | False            | Toggle debug output                                                          |
-| locked                | mixed                               | `None`           | Value to return when lock already acquired                                   |
-| release_on_completion | bool                                | `False`          | Release the lock when the task completes if the timeout has not been reached |
+`lock(...)` supports two calling styles:
 
-Note: If no value for lock_name is passed, the lock name will be auto-generated.
-The generated name is based on all args and kwargs in the order they are passed
-when the function is called and will follow the format `<function_name>:<args>:<kwargs>`.
-For a function call such as `foo(1, 'temp', bar9=4, bar8=3)`, the lock_name would be `foo:1:temp:4:3`.
-If a parameter is a type with only the default `__str__` or `__repr__`, it will not be included in the name.
+1. Decorator usage: `@lock(...)`
+2. Context-manager usage: `with lock(function, args=[...], kwargs={...}, ...)`
 
-## `lock_name` Explanation
+In both cases, the helper:
 
-lock_name is the option with the most flexibility depending on user needs.
-This option allows the user to either hard-code the lock name or use a subset of available parameters.
+- builds a lock name
+- acquires a Redis lock from the configured Django cache
+- returns the configured `locked` value when acquisition fails
+- optionally releases the lock on completion if `release_on_completion=True`
 
-### Hard-coded Lock name
+By default, lock acquisition is non-blocking.
 
-To hard-code the lock name, pass a string with the desired name.
+## Options
 
-### Variable Lock Name
+The following options are supported in both decorator and context-manager usage.
 
-By default, the name generator will use all valid args & kwargs.
-Passing a list allows the user to instead select a subset of available parameters.
-Elements of this list must either be strings, lists, or Priority Lists.
+| Option name | Type | Default | Description |
+| --- | --- | --- | --- |
+| `lock_name` | `str | list[str | list | PriorityList]` | auto-generated | Lock key to acquire. See details below. |
+| `timeout` | `int | float` | `60` | Lock TTL in seconds. |
+| `blocking` | `bool` | `False` | Whether lock acquisition should block. |
+| `blocking_timeout` | `int | float` | Redis default | Maximum time to wait when `blocking=True`. |
+| `sleep` | `int | float` | Redis default | Sleep interval between blocking retries. |
+| `cache` | `str` | `"default"` | Django cache alias used to create the lock. |
+| `debug` | `bool` | `False` | Emit a debug log when lock acquisition fails. |
+| `locked` | `Any` | `None` | Value returned or yielded when the lock is already held. |
+| `release_on_completion` | `bool` | `False` | Explicitly release the lock in `finally`. |
 
-#### Strings
+## Lock Name Generation
 
-A string element indicates a _function parameter_ should be part of the lock name.
-
-#### Lists
-
-A list element indicates an _attribute or element of a function parameter_ an arbitrary number of layers deep
-should be part of the lock name.
-This functionality is best explained in broad terms with some examples.
-
-```python
-class ClassExample:
-    def __init__(self):
-        self.id = 27
-
-    @lock(lock_name=['arg1', ['self', 'id']])
-    def foo(self, arg1):
-        pass
-
-@lock(lock_name=['arg4', 'arg2', 'arg3'])
-def bar(arg1, arg2, arg3, arg4):
-    pass
-```
-
-Take the above code as two example definitions.
-In the case of `bar`, a function call of `bar(1, 2, 3, 4)` would get a lock name of `bar:4:2:3`
-In the case of `foo`, a function call of `ClassExample().foo(1)` would get a lock name of `foo:1:27`.
-
-Using a list to specify an element of the lock name is very flexible.
-The first element should be a string specifing a function parameter.
-Each additional element of the list should specify either an attribute or an index of the previous element.
-The last element's string representation is used as the lock_name element.
-To give an example that showcases everything possible, `["self", "obj1", "dict1", "list1", 0]` would
-look for `self.obj1.dict1["list1"][0]` when generating the lock name.
-
-#### Priority Lists
-
-A Priority List indicates _the first function parameter in the priority list that evaluates to True_ should be part of the lock name.
-`PriorityList` is a custom class included in the package.
-It is functionally identical to python's built-in list type, but serves to mark a list for special evaluation when generating the lock name.
-When a Priority List is being evaluated, the first parameter found with a value equivalent to True is used in the lock name.
-The simplest way to use a priority list is to create an instance when defining the lock name.
-
-Example: `@lock(lock_name=[ PriorityList(["foo", "bar"]) ])`
-
-In the above example, the lock name would first try to be `<func_name>:<foo>`.
-If the value of `foo` would evaluate to False, the lock name would then try to be `<func_name>:<bar>`.
-If `bar` also evaluated to False, the lock name would be `<func_name>`.
-
-A normal list can not be an element of a priority list.
-
-## Examples
+If `lock_name` is not provided, the helper builds a key that starts with the
+function name and appends all usable positional and keyword argument values:
 
 ```python
 @lock
-def plain(arg, kwarg):
-    # lock_name would be plain:<arg>:<kwarg>
+def foo(a, b=None):
     pass
 
-@lock(lock_name="hard_code_name")
-def hard_name(arg, kwarg):
-    # lock_name would be hard_name:hard_code_name
-    pass
 
-@lock(lock_name=["kwarg", "arg"])
-def kwarg(arg, kwarg):
-    # lock_name would be kwarg:<kwarg>:<arg>
-    pass
-
-@lock(lock_name=[ PriorityList(["kwarg1", "kwarg2", "arg"]) ])
-def priority_list(arg=None, kwarg1=None, kwarg2=None):
-    # For a function call of priority_list(0, kwarg2=2), lock_name would be priority_list:2
-
-@lock(timeout=20)
-def timeout(arg, kwarg):
-    pass
-
-@lock(blocking=True)
-def blocking(arg, kwarg):
-    pass
-
-@lock(debug=True)
-def debug(arg, kwarg):
-    pass
-
-@lock(lock_name=[ ["self", "name_list", 1], "debug", PriorityList(["is_resend", "language"]) ], timeout=30, cache='other', blocking=True, debug=True)
-def combination(self, url=None, language='en', is_resend=False, debug=False):
-    # lock_name would be combination:<self.name_list[1]>:<debug>: <is_resend>/<language>/''
-    # timeout would be 30 sec instead of 60 sec
-    # lock would attempt to use a Django cache named 'other'
-    # lock would be blocking
-    # decorator would print debug information
-    pass
-
+foo(1, b=2)  # lock name => "foo:1:2"
 ```
 
-### Usage as a Context Manager
+Values that only render as the default Python object string or repr, such as
+`<MyObject object at 0x...>`, are skipped to avoid unstable lock names.
+
+## `lock_name` Forms
+
+### String
+
+Passing a string uses that value directly as the full Redis lock key.
 
 ```python
-def function(args, kwarg):
-    with lock(function, args=args, kwargs=kwargs, **options) as lock:
-        if lock is not None:
-            return lock # return lock text
-        else:
-            #task
-            pass
+@lock(lock_name="nightly-report")
+def run_report():
+    pass
 ```
+
+### List of Parameters
+
+Passing a list lets you choose which function inputs become part of the key.
+Each element may be:
+
+- a parameter name as `str`
+- an attribute/index traversal as `list`
+- a `PriorityList`
+
+```python
+@lock(lock_name=["entity_id", "workflow_id"])
+def process_entity(workflow_id, entity_id):
+    pass
+
+
+process_entity(10, 22)  # lock name => "process_entity:22:10"
+```
+
+The order in `lock_name` is the order used in the generated key.
+
+### Attribute or Index Traversal
+
+Use a nested list when the key should come from a value inside a parameter.
+The first element must be the parameter name. Each later element is resolved
+recursively as either an attribute access or an index/key lookup.
+
+```python
+class Example:
+    def __init__(self):
+        self.metadata = {"ids": [17]}
+
+    @lock(lock_name=[["self", "metadata", "ids", 0], "task_type"])
+    def run(self, task_type):
+        pass
+```
+
+For `Example().run("sync")`, the lock name becomes:
+
+```text
+run:17:sync
+```
+
+### `PriorityList`
+
+`PriorityList` selects the first configured parameter whose value is truthy.
+This is useful when several identifiers may be available but only one should be
+part of the lock key.
+
+```python
+from django_redis_task_lock import PriorityList, lock
+
+
+@lock(lock_name=[PriorityList(["customer_id", "account_id", "email"])])
+def sync_customer(customer_id=None, account_id=None, email=None):
+    pass
+```
+
+If `customer_id` is falsey and `account_id=12`, the lock name becomes:
+
+```text
+sync_customer:12
+```
+
+If every value in the `PriorityList` is falsey, nothing is appended for that
+element and the key remains whatever has already been built.
+
+## Decorator Usage
+
+```python
+from django.conf import settings
+
+from django_redis_task_lock import lock
+
+
+@lock(
+    lock_name=["content_type_id", "object_pk"],
+    timeout=120,
+    debug=settings.DEBUG,
+    locked=settings.TASK_LOCK_MESSAGE,
+)
+def update_audit_snapshot(content_type_id, object_pk):
+    return "done"
+```
+
+Behavior:
+
+- if the lock is acquired, the wrapped function runs normally
+- if the lock is already held, the decorator returns the `locked` value
+- if `release_on_completion=True`, `lock.release()` is called in `finally`
+
+## Context-Manager Usage
+
+Use the context-manager form when you need a lock around only part of a
+function, or when the protected code is not naturally expressed as a decorated
+function.
+
+```python
+from django.conf import settings
+
+from django_redis_task_lock import lock
+
+
+def bulk_update_from_document_task(instance_id, content_type_id, batch_size=100, starting_idx=0):
+    with lock(
+        bulk_update_from_document_task,
+        args=[instance_id, content_type_id],
+        kwargs={
+            "batch_size": batch_size,
+            "starting_idx": starting_idx,
+        },
+        debug=settings.DEBUG,
+        locked=settings.TASK_LOCK_MESSAGE,
+        timeout=2400,
+        lock_name=["instance_id", "content_type_id", "batch_size", "starting_idx"],
+    ) as task_lock:
+        if task_lock is not None:
+            return settings.TASK_LOCK_MESSAGE
+
+        return "work completed"
+```
+
+### Context-Manager Rules
+
+- `func` is required and should be the function whose name/signature should be
+  used to build the lock key.
+- `args` should be a positional argument list or tuple. `None` is treated as an
+  empty list.
+- `kwargs` should be a dict of keyword arguments relevant to lock-name
+  generation. `None` is treated as an empty dict.
+- top-level lock options such as `timeout`, `cache`, `blocking`,
+  `blocking_timeout`, `sleep`, and `release_on_completion` are honored
+  directly.
+- if the same option is present both at the top level and inside `kwargs`,
+  the value inside `kwargs` wins. This preserves the library's historical
+  calling pattern.
+
+When acquisition fails, the context manager yields the configured `locked`
+value. When acquisition succeeds, it yields `None`.
+
+## Errors
+
+The helper raises configuration errors when `lock_name` refers to values that do
+not exist in the target function call or definition.
+
+- `ValueError`: parameter name in `lock_name` is invalid or unavailable
+- `KeyError`: nested attribute/key traversal fails
+- `TypeError`: unsupported element type inside `lock_name`
+
+## Practical Notes
+
+- Prefer stable business identifiers in `lock_name` instead of full objects.
+- Prefer explicit `lock_name` definitions for Celery tasks and other retryable
+  workflows so the lock key stays predictable across releases.
+- Use `release_on_completion=True` only when the code should release the lock
+  immediately instead of letting the Redis timeout expire naturally.

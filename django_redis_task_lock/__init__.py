@@ -1,30 +1,99 @@
+"""Redis-backed task locking helpers used by shared Django applications."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterator, Mapping, MutableMapping, Sequence
 from contextlib import contextmanager
 from functools import wraps
 from inspect import getfullargspec
 from re import match
+from typing import (
+    Any,
+    ContextManager,
+    Final,
+    ParamSpec,
+    Protocol,
+    TypeAlias,
+    TypedDict,
+    TypeVar,
+    cast,
+)
 
+import structlog
 from django.core.cache import caches
 
+LOGGER = structlog.get_logger(__name__)
 
-class PriorityList(list):
-    pass
+P = ParamSpec("P")
+R = TypeVar("R")
+
+LockNameAttribute: TypeAlias = str | int
 
 
-def __attr_finder(obj, attr_list):
-    """
-    Recursively searches for attributes or
-    keys in an object based on the provided attribute list.
+class LockProtocol(Protocol):
+    """Protocol describing the Redis lock methods used by this module."""
+
+    def acquire(self, *args: Any, **kwargs: Any) -> bool:
+        """Attempt to acquire the lock."""
+
+    def release(self) -> None:
+        """Release the lock."""
+
+
+class CacheProtocol(Protocol):
+    """Protocol describing the cache API used to create a lock."""
+
+    def lock(self, lock_name: str, timeout: int | float) -> LockProtocol:
+        """Create a lock for the given cache key."""
+
+
+class PriorityList(list[str]):
+    """Parameter names evaluated in order to build a lock-name component."""
+
+
+LockNamePart: TypeAlias = str | PriorityList | list[LockNameAttribute]
+LockNameOption: TypeAlias = str | list[LockNamePart]
+
+
+class LockOptions(TypedDict, total=False):
+    """Options supported by the lock decorator and context-manager helper."""
+
+    debug: bool
+    cache: str
+    locked: Any
+    blocking: bool
+    timeout: int | float
+    lock_name: LockNameOption
+    release_on_completion: bool
+    blocking_timeout: int | float
+    sleep: int | float
+
+
+LOCK_OPTION_KEYS: Final[set[str]] = {
+    "debug",
+    "cache",
+    "locked",
+    "blocking",
+    "timeout",
+    "lock_name",
+    "release_on_completion",
+    "blocking_timeout",
+    "sleep",
+}
+
+
+def __attr_finder(obj: Any, attr_list: Sequence[LockNameAttribute]) -> str:
+    """Resolve an attribute or mapping/index chain into a string lock component.
 
     Args:
-        obj (object): The object in which to search for attributes or keys.
-        attr_list (list): A list of attributes or
-        keys to search for in the object.
+        obj: Object, mapping, or sequence that contains the desired value.
+        attr_list: Ordered attribute names or mapping/index keys to traverse.
 
     Returns:
-        str: The value of the found attribute or key, converted to a string.
+        The resolved value converted to a string.
 
     Raises:
-        KeyError: If the specified attribute or key is not found in the object.
+        KeyError: If a requested key cannot be found while traversing the chain.
     """
     attr = attr_list[0]
     if type(attr) is str and hasattr(obj, attr):
@@ -32,85 +101,141 @@ def __attr_finder(obj, attr_list):
     else:
         try:
             attr_val = obj[attr]
-        except KeyError as e:
+        except KeyError as exc:
             message = (
-                str(e)
+                str(exc)
                 + f'\nThe lock decorator is configured incorrectly. Could not find attribute/key "{attr}" of object "{obj}"'
             )
             raise KeyError(message) from None
+
     if len(attr_list) == 1:
         return str(attr_val)
-    else:
-        return __attr_finder(attr_val, attr_list[1:])
+
+    return __attr_finder(attr_val, attr_list[1:])
 
 
-def lock(*args, **options):
-    def _lock(func):
-        """
-        Decorator function that wraps the specified function with locking functionality.
+def _build_context_options(
+    base_options: LockOptions, call_kwargs: MutableMapping[str, Any]
+) -> LockOptions:
+    """Build context-manager lock options from explicit and keyword overrides.
+
+    Args:
+        base_options: Lock options passed directly to ``lock(...)``.
+        call_kwargs: Keyword arguments associated with the protected function
+            call. Matching lock-option keys are removed and treated as overrides.
+
+    Returns:
+        A merged options dictionary containing defaults, explicit options, and
+        compatible overrides extracted from ``call_kwargs``.
+    """
+    options: LockOptions = {
+        "debug": False,
+        "cache": "default",
+        "locked": None,
+        "blocking": False,
+        "timeout": 60,
+        "lock_name": [],
+        "release_on_completion": False,
+    }
+    options.update(base_options)
+
+    for option_name in LOCK_OPTION_KEYS:
+        if option_name in call_kwargs:
+            options[option_name] = call_kwargs.pop(option_name)
+
+    return options
+
+
+def lock(
+    *args: Any,
+    **options: Any,
+) -> Callable[[Callable[P, R]], Callable[P, R | Any]] | ContextManager[Any | None]:
+    """Create a lock-aware decorator or context manager.
+
+    This helper supports two calling styles:
+
+    - ``@lock(...)`` returns a decorator for a callable.
+    - ``with lock(func, args=[...], kwargs={...}, ...)`` returns a context
+      manager that acquires a lock for part of a workflow.
+
+    Args:
+        *args: Either the callable for context-manager usage or no positional
+            arguments for decorator usage.
+        **options: Lock acquisition and lock-name configuration options.
+
+    Returns:
+        Either a decorator that wraps a callable with lock acquisition, or a
+        context manager that yields the configured ``locked`` value when the
+        lock cannot be acquired.
+    """
+
+    def _lock(func: Callable[P, R]) -> Callable[P, R | Any]:
+        """Wrap a callable so it runs only when the Redis lock is acquired.
 
         Args:
-            func (callable): The function to be decorated.
+            func: Function to guard with a Redis-backed lock.
 
         Returns:
-            callable: The wrapped function with locking functionality.
+            A wrapped callable that either executes ``func`` or returns the
+            configured ``locked`` fallback value.
         """
 
         @wraps(func)
-        def __wrapper(*args, **kwargs):
+        def __wrapper(*args: P.args, **kwargs: P.kwargs) -> R | Any:
             lock_name = construct_lock_name(func, args, kwargs, **options)
-            lock = acquire_lock(lock_name, options)
-            if lock is None:
+            redis_lock = acquire_lock(lock_name, options)
+            if redis_lock is None:
                 return options.get("locked", None)
             try:
                 return func(*args, **kwargs)
             finally:
-                # Can optionally release the lock here
                 if options.get("release_on_completion", False) is True:
                     try:
-                        lock.release()
+                        redis_lock.release()
                     except Exception:
                         pass
 
         return __wrapper
 
     @contextmanager
-    def _lock_context(func, args, kwargs, **options):
-        """
-        Context manager that acquires a lock and yields control to the enclosed block.
+    def _lock_context(
+        func: Callable[..., Any],
+        args: Sequence[Any] | None,
+        kwargs: Mapping[str, Any] | None,
+        **options: Any,
+    ) -> Iterator[Any | None]:
+        """Acquire a lock for a manually managed block of work.
 
         Args:
-            func (callable): The function being decorated.
-            *args: Positional arguments passed to the decorated function.
-            **kwargs: Keyword arguments passed to the decorated function.
+            func: Callable whose name and signature should be used when building
+                the lock key.
+            args: Positional arguments that should participate in lock-name
+                generation.
+            kwargs: Keyword arguments that should participate in lock-name
+                generation.
+            **options: Lock acquisition and lock-name configuration options.
 
         Yields:
-            Any: The value specified by the "locked" option if the lock cannot be acquired,
-            otherwise no value is yielded.
+            The configured ``locked`` fallback value when the lock cannot be
+            acquired. Otherwise yields ``None`` after the lock is acquired.
         """
-        options = {
-            "debug": kwargs.pop("debug", False),
-            "cache": kwargs.pop("cache", "default"),
-            "locked": kwargs.pop("locked", None),
-            "blocking": kwargs.pop("blocking", False),
-            "timeout": kwargs.pop("timeout", 60),
-            "lock_name": kwargs.pop("lock_name", []),
-            "release_on_completion": kwargs.pop("release_on_completion", False),
-        }
-
-        kwargs["options"] = options
-        lock_name = construct_lock_name(func, args, kwargs, **options)
-        lock = acquire_lock(lock_name, options)
-        if lock is None:
-            yield options.get("locked", None)
+        positional_args = [] if args is None else list(args)
+        keyword_args: dict[str, Any] = {} if kwargs is None else dict(kwargs)
+        context_options = _build_context_options(options, keyword_args)
+        keyword_args["options"] = context_options
+        lock_name = construct_lock_name(
+            func, positional_args, keyword_args, **context_options
+        )
+        redis_lock = acquire_lock(lock_name, context_options)
+        if redis_lock is None:
+            yield context_options.get("locked", None)
         else:
             try:
-                yield
+                yield None
             finally:
-                # Can optionally release the lock here
-                if options["release_on_completion"] is True:
+                if context_options["release_on_completion"] is True:
                     try:
-                        lock.release()
+                        redis_lock.release()
                     except Exception:
                         pass
 
@@ -119,56 +244,69 @@ def lock(*args, **options):
     return _lock
 
 
-def construct_lock_name(func, args, kwargs, **options):
-    """
-    Constructs a lock name based on the specified function,
-    arguments, options, and keyword arguments.
+def construct_lock_name(
+    func: Callable[..., Any],
+    args: Sequence[Any],
+    kwargs: Mapping[str, Any],
+    **options: Any,
+) -> str:
+    """Construct the Redis lock name for a function invocation.
 
     Args:
-        func (callable): The function for which the lock name is being constructed.
-        args (tuple): The positional arguments passed to the function.
-        options (dict): A dictionary of options for constructing the lock name.
-        **kwargs: Keyword arguments passed to the function.
+        func: Function whose invocation is being locked.
+        args: Positional arguments passed to the function.
+        kwargs: Keyword arguments passed to the function.
+        **options: Lock configuration, including the optional ``lock_name``
+            override.
 
     Returns:
-        str: The constructed lock name.
+        A Redis lock name derived from the configured rules and call inputs.
 
     Raises:
-        ValueError: If the lock decorator is configured incorrectly and
-        a parameter or PriorityList element is not found.
-        TypeError: If an invalid type is used to specify a lock name.
+        ValueError: If a configured parameter name cannot be resolved from the
+            function call or signature.
+        TypeError: If an unsupported type is used inside ``lock_name``.
     """
     default_str_regex = "<.*object at.*>"
     default_repr_regex = default_str_regex
     lock_name = f"{func.__name__}"
 
     if "lock_name" in options:
-        if type(options["lock_name"]) is str:
-            lock_name = options["lock_name"]
-        elif type(options["lock_name"]) is list:
+        lock_name_option = options["lock_name"]
+        if isinstance(lock_name_option, str):
+            lock_name = lock_name_option
+        elif isinstance(lock_name_option, list):
             arg_spec = getfullargspec(func)
-            param_list = arg_spec[0]
-            defaults = arg_spec[3]
-            for var in options["lock_name"]:
-                if type(var) is str:  # If specifying single parameter
-                    if var in kwargs:  # If parameter is in kwargs
+            param_list = arg_spec.args
+            defaults = arg_spec.defaults or ()
+            default_param_list = param_list[-len(defaults) :] if defaults else []
+            for var in lock_name_option:
+                if isinstance(var, str):
+                    if var in kwargs:
                         lock_name += ":" + str(kwargs[var])
-                    elif var in param_list:  # If parameter is a real arg
+                    elif var in param_list:
                         arg_index = param_list.index(var)
-                        if (
-                            len(args) > arg_index
-                        ):  # If the parameter is passed positionally in args
+                        if len(args) > arg_index:
                             lock_name += ":" + str(args[arg_index])
-                        else:  # The parameter is using a default value
-                            default_index = param_list[-len(defaults) :].index(var)
+                        else:
+                            if var not in default_param_list:
+                                message = (
+                                    "\nThe lock decorator is configured incorrectly. Could not find parameter "
+                                    f'"{var}" in function call or definition'
+                                )
+                                raise ValueError(message)
+                            default_index = default_param_list.index(var)
                             lock_name += ":" + str(defaults[default_index])
-                    else:  # The parameter specified isn't an argument of the function
-                        message = f'\nThe lock decorator is configured incorrectly. Could not find parameter "{var}" in function call or definition'
+                    else:
+                        message = (
+                            "\nThe lock decorator is configured incorrectly. Could not find parameter "
+                            f'"{var}" in function call or definition'
+                        )
                         raise ValueError(message)
-                elif type(var) is PriorityList:  # If specifying a priority list
+                elif isinstance(var, PriorityList):
                     for param_name in var:
                         if param_name in kwargs:
-                            if kwargs[param_name]:  # If the param has a value
+                            if kwargs[param_name]:
                                 lock_name += ":" + str(kwargs[param_name])
                                 break
                         elif param_name in param_list:
@@ -178,16 +316,23 @@ def construct_lock_name(func, args, kwargs, **options):
                                     lock_name += ":" + str(args[arg_index])
                                     break
                             else:
-                                default_index = param_list[-len(defaults) :].index(
-                                    param_name
-                                )
+                                if param_name not in default_param_list:
+                                    message = (
+                                        "\nThe lock decorator is configured incorrectly. Could not find "
+                                        f'parameter "{param_name}" within PriorityList {var} in function call or definition'
+                                    )
+                                    raise ValueError(message)
+                                default_index = default_param_list.index(param_name)
                                 if defaults[default_index]:
                                     lock_name += ":" + str(defaults[default_index])
                                     break
                         else:
-                            message = f'\nThe lock decorator is configured incorrectly. Could not find parameter "{param_name}" within PriorityList {var} in function call or definition'
+                            message = (
+                                "\nThe lock decorator is configured incorrectly. Could not find "
+                                f'parameter "{param_name}" within PriorityList {var} in function call or definition'
+                            )
                             raise ValueError(message)
-                elif type(var) is list:  # If specifying an attribute chain
+                elif isinstance(var, list):
                     param_name = var[0]
                     if param_name in kwargs:
                         lock_name += ":" + __attr_finder(kwargs[param_name], var[1:])
@@ -196,59 +341,69 @@ def construct_lock_name(func, args, kwargs, **options):
                         if len(args) > arg_index:
                             lock_name += ":" + __attr_finder(args[arg_index], var[1:])
                         else:
-                            default_index = param_list[-len(defaults) :].index(
-                                param_name
-                            )
+                            if param_name not in default_param_list:
+                                message = (
+                                    "\nThe lock decorator is configured incorrectly. Could not find parameter "
+                                    f'"{param_name}" in function call or definition'
+                                )
+                                raise ValueError(message)
+                            default_index = default_param_list.index(param_name)
                             lock_name += ":" + __attr_finder(
                                 defaults[default_index], var[1:]
                             )
                     else:
-                        message = f'\nThe lock decorator is configured incorrectly. Could not find parameter "{param_name}" in function call or definition'
+                        message = (
+                            "\nThe lock decorator is configured incorrectly. Could not find parameter "
+                            f'"{param_name}" in function call or definition'
+                        )
                         raise ValueError(message)
                 else:
-                    message = f'\nThe lock decorator is configured incorrectly. "{type(var)}" is not a valid type for specifying a lock name'
+                    message = (
+                        '\nThe lock decorator is configured incorrectly. "'
+                        f'{type(var)}" is not a valid type for specifying a lock name'
+                    )
                     raise TypeError(message)
-
     else:
-        if args:
-            for arg in args:
-                if not match(default_str_regex, str(arg)):
-                    lock_name += ":" + str(arg)
-                elif not match(default_repr_regex, repr(arg)):
-                    lock_name += ":" + repr(arg)
-        if kwargs:
-            for val in kwargs.values():
-                if not match(default_str_regex, str(val)):
-                    lock_name += ":" + str(val)
-                elif not match(default_repr_regex, repr(val)):
-                    lock_name += ":" + repr(val)
+        for arg in args:
+            if not match(default_str_regex, str(arg)):
+                lock_name += ":" + str(arg)
+            elif not match(default_repr_regex, repr(arg)):
+                lock_name += ":" + repr(arg)
+        for val in kwargs.values():
+            if not match(default_str_regex, str(val)):
+                lock_name += ":" + str(val)
+            elif not match(default_repr_regex, repr(val)):
+                lock_name += ":" + repr(val)
 
     return lock_name
 
 
-def acquire_lock(lock_name, options):
-    """
-    Acquires a lock using the specified lock name and options.
+def acquire_lock(lock_name: str, options: Mapping[str, Any]) -> LockProtocol | None:
+    """Acquire a Redis lock using the configured cache and acquire options.
 
     Args:
-        lock_name (str): The name of the lock to acquire.
-        options (dict): A dictionary of options for acquiring the lock.
+        lock_name: Name of the Redis lock to acquire.
+        options: Lock acquisition settings such as cache alias, timeout, and
+            blocking behavior.
 
     Returns:
-        Lock or None: The acquired lock object if successful,
-        or None if the lock is already acquired.
+        The acquired lock object when acquisition succeeds. Returns ``None``
+        when the lock is already held by another worker.
     """
-
-    # Code block where the lock is acquired
-    lock = caches[options.get("cache", "default")].lock(
-        lock_name, timeout=options.get("timeout", 60)
+    cache_backend = caches[options.get("cache", "default")]
+    redis_lock = cast(
+        LockProtocol, cache_backend.lock(lock_name, timeout=options.get("timeout", 60))
     )
 
-    # Checks if the lock is already acquired
-    blocking = options.get("blocking", False)
-    if not lock.acquire(blocking=blocking):
+    acquire_kwargs: dict[str, Any] = {"blocking": options.get("blocking", False)}
+    if "blocking_timeout" in options:
+        acquire_kwargs["blocking_timeout"] = options["blocking_timeout"]
+    if "sleep" in options:
+        acquire_kwargs["sleep"] = options["sleep"]
+
+    if not redis_lock.acquire(**acquire_kwargs):
         if options.get("debug", False):
-            print(f"{lock_name} lock already acquired...return")
+            LOGGER.debug("lock already acquired", lock_name=lock_name)
         return None
 
-    return lock
+    return redis_lock
